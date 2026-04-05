@@ -37,6 +37,9 @@ set -euo pipefail
 ALLOWED_USERS=(
     "cyberrange"
     "GREYTEAM"
+    "scp073"
+    "scp343"
+    "ntf"
 )
 
 # =============================================================================
@@ -47,7 +50,7 @@ ALLOWED_USERS=(
 #   "ssh-ed25519 AAAA... user@hostname"
 # =============================================================================
 TEAM_PUBKEYS=(
-    
+
 )
 
 # =============================================================================
@@ -102,9 +105,45 @@ else
 fi
 
 # =============================================================================
-# Step 2 — Write drop-in hardening config
+# Step 2 — Enforce SSH host key file permissions
 #
-# Use a drop-in file in sshd_config.d/ rather than editing sshd_config
+# Private host keys must be 600 root:root — readable only by root.
+# Public host keys should be 644 root:root — world-readable is fine and
+# expected since clients need the public key to verify the host.
+# Incorrect permissions on private keys will cause sshd to refuse to start.
+# =============================================================================
+info "Step 2: Enforcing SSH host key permissions..."
+
+while IFS= read -r -d '' keyfile; do
+    if [[ "$keyfile" == *.pub ]]; then
+        expected_mode="644"
+    else
+        expected_mode="600"
+    fi
+
+    current_mode=$(stat -c '%a' "$keyfile")
+    current_owner=$(stat -c '%U:%G' "$keyfile")
+
+    if [[ "$current_mode" != "$expected_mode" ]] || [[ "$current_owner" != "root:root" ]]; then
+        warn "  ${keyfile} — mode: ${current_mode} owner: ${current_owner} (expected: ${expected_mode} root:root)"
+        if $DRY_RUN; then
+            dryrun "  Would run: chown root:root ${keyfile} && chmod ${expected_mode} ${keyfile}"
+        else
+            chown root:root "$keyfile"
+            chmod "$expected_mode" "$keyfile"
+            success "  Fixed: ${keyfile}"
+        fi
+    else
+        success "  ${keyfile} — OK"
+    fi
+done < <(find /etc/ssh -maxdepth 1 -name 'ssh_host_*' -print0 2>/dev/null)
+
+echo ""
+
+# =============================================================================
+# Step 3 — Write drop-in hardening config
+#
+# We use a drop-in file in sshd_config.d/ rather than editing sshd_config
 # directly. 
 # This means:
 #   - The original sshd_config is untouched
@@ -113,7 +152,7 @@ fi
 #   - sshd processes drop-in files in lexical order; 99- prefix ensures
 #     our settings are applied last and override earlier defaults
 # =============================================================================
-info "Step 2: Writing hardened SSH drop-in config..."
+info "Step 3: Writing hardened SSH drop-in config..."
 
 # Build the AllowUsers line from our array
 ALLOW_USERS_LINE="AllowUsers ${ALLOWED_USERS[*]}"
@@ -138,6 +177,22 @@ PermitEmptyPasswords no
 # Eliminates a secondary auth pathway red team could abuse
 KbdInteractiveAuthentication no
 
+# Disable GSSAPI authentication — not used on this network, removes
+# a Kerberos-based auth pathway that has no legitimate use here
+GSSAPIAuthentication no
+
+# Disable host-based authentication — prevents trust relationships
+# between hosts from being exploited for lateral movement
+HostbasedAuthentication no
+
+# Ignore .rhosts and .shosts files — these are ancient trust mechanisms
+# that should never be used in a modern environment
+IgnoreRhosts yes
+
+# Ensure PAM is enabled so PAM controls (lockout, password policy)
+# apply to SSH sessions as well as local logins
+UsePAM yes
+
 # -- Access Control --
 
 # Only these users may authenticate via SSH
@@ -149,6 +204,9 @@ ${ALLOW_USERS_LINE}
 # Disable X11 forwarding — no GUI needed, removes a tunneling vector
 X11Forwarding no
 
+# Disable all forwarding in one directive (TCP, agent, X11)
+DisableForwarding yes
+
 # Disable TCP forwarding — prevents SSH being used as a tunnel/proxy
 AllowTcpForwarding no
 
@@ -157,6 +215,24 @@ AllowAgentForwarding no
 
 # Disable SSH tunneling
 PermitTunnel no
+
+# -- Cryptography --
+# Restrict to modern, vetted algorithms only.
+# These drop SSHv1 remnants, CBC-mode ciphers, MD5/SHA1 MACs,
+# and weak key exchange algorithms that are exploitable.
+#
+# NOTE: If the scoring checker uses an outdated SSH client it may
+# fail to connect after these are applied. Check journalctl -u sshd
+# immediately after reloading if scoring drops.
+
+# Key exchange — only Diffie-Hellman and ECDH with strong curves
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521
+
+# Ciphers — AES-GCM and ChaCha20 only, all CBC-mode dropped
+Ciphers chacha20-poly1305@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr,aes128-gcm@openssh.com,aes256-gcm@openssh.com
+
+# MACs — HMAC-SHA2 and ETM variants only, MD5 and SHA1 dropped
+MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha2-256,hmac-sha2-512
 
 # -- Session & Timeout --
 
@@ -195,13 +271,13 @@ else
 fi
 
 # =============================================================================
-# Step 3 — Validate configuration before restarting
+# Step 4 — Validate configuration before restarting
 #
 # sshd -t performs a full config test without actually restarting the daemon.
 # If this fails, we abort rather than restarting into a broken config and
 # locking everyone out.
 # =============================================================================
-info "Step 3: Validating SSH configuration..."
+info "Step 4: Validating SSH configuration..."
 
 if $DRY_RUN; then
     dryrun "Would run: sshd -t"
@@ -219,15 +295,13 @@ else
 fi
 
 # =============================================================================
-# Step 4 — Audit authorized_keys files
+# Step 5 — Audit authorized_keys files
 #
-# Check every users ~/.ssh/authorized_keys for keys that don't belong
-# to blue or grey team.
-# We flag unauthorized keys but do NOT automatically remove them.
-# Removal is a manual decision to avoid accidentally removing a grey team
-# or blue team key
+# Check every user's ~/.ssh/authorized_keys for keys that don't belong
+# to our team. We flag unauthorized keys but do NOT automatically remove them —
+# removal is a manual decision to avoid accidentally removing a grey team key
 # =============================================================================
-info "Step 4: Auditing authorized_keys files..."
+info "Step 5: Auditing authorized_keys files..."
 echo ""
 
 # Build a lookup set of known team keys
@@ -284,13 +358,13 @@ else
 fi
 
 # =============================================================================
-# Step 5 — Restart sshd to apply changes
+# Step 6 — Restart sshd to apply changes
 #
 # We only reach this point if sshd -t passed. Do NOT use restart — use
 # reload where possible so existing sessions aren't dropped. On Debian,
 # systemctl reload sshd re-reads the config without killing active sessions.
 # =============================================================================
-info "Step 5: Reloading sshd..."
+info "Step 6: Reloading sshd..."
 
 if $DRY_RUN; then
     dryrun "Would run: systemctl reload sshd"
