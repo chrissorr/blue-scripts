@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# harden_ssh.sh — Harden SSH configuration on Debian 13 boxes
+# harden_ssh.sh - Harden SSH configuration on Debian 13 boxes
 #
 # Usage:
 #   sudo ./harden_ssh.sh [--dry-run]
@@ -14,9 +14,9 @@
 # Safety:
 #   - Always backs up sshd_config before touching it
 #   - Uses a drop-in file in sshd_config.d/ rather than editing sshd_config
-#     directly — easier to revert, less risk of corrupting existing config
+#     directly - easier to revert, less risk of corrupting existing config
 #   - Validates sshd config before restarting to prevent locking everyone out
-#   - AllowUsers is set explicitly — update ALLOWED_USERS before running
+#   - AllowUsers is set explicitly - update ALLOWED_USERS before running
 #   - Run with --dry-run first to preview all changes
 #
 # !! READ BEFORE RUNNING !!
@@ -27,7 +27,7 @@
 set -euo pipefail
 
 # =============================================================================
-# !! ALLOWED USERS — EDIT THIS BEFORE COMPETITION DAY !!
+# !! ALLOWED USERS - EDIT THIS BEFORE COMPETITION DAY !!
 #
 # Every user listed here will be permitted to SSH into the box.
 # Any user NOT listed here will be denied at the SSH level regardless
@@ -43,7 +43,7 @@ ALLOWED_USERS=(
 )
 
 # =============================================================================
-# !! TEAM PUBLIC KEYS — EDIT THIS BEFORE COMPETITION DAY !!
+# !! TEAM PUBLIC KEYS - EDIT THIS BEFORE COMPETITION DAY !!
 #
 # Paste the full contents of each allowed .pub file as a separate
 # entry. Example:
@@ -81,7 +81,7 @@ fi
 
 if [[ "${1:-}" == "--dry-run" ]]; then
     DRY_RUN=true
-    warn "DRY-RUN mode — no changes will be made"
+    warn "DRY-RUN mode - no changes will be made"
     echo ""
 fi
 
@@ -91,7 +91,7 @@ if ! command -v sshd &>/dev/null; then
 fi
 
 # =============================================================================
-# Step 1 — Backup existing sshd_config
+# Step 1 - Backup existing sshd_config
 # =============================================================================
 info "Step 1: Backing up existing SSH configuration..."
 
@@ -105,10 +105,10 @@ else
 fi
 
 # =============================================================================
-# Step 2 — Enforce SSH host key file permissions
+# Step 2 - Enforce SSH host key file permissions
 #
-# Private host keys must be 600 root:root — readable only by root.
-# Public host keys should be 644 root:root — world-readable is fine and
+# Private host keys must be 600 root:root - readable only by root.
+# Public host keys should be 644 root:root - world-readable is fine and
 # expected since clients need the public key to verify the host.
 # Incorrect permissions on private keys will cause sshd to refuse to start.
 # =============================================================================
@@ -125,7 +125,7 @@ while IFS= read -r -d '' keyfile; do
     current_owner=$(stat -c '%U:%G' "$keyfile")
 
     if [[ "$current_mode" != "$expected_mode" ]] || [[ "$current_owner" != "root:root" ]]; then
-        warn "  ${keyfile} — mode: ${current_mode} owner: ${current_owner} (expected: ${expected_mode} root:root)"
+        warn "  ${keyfile} - mode: ${current_mode} owner: ${current_owner} (expected: ${expected_mode} root:root)"
         if $DRY_RUN; then
             dryrun "  Would run: chown root:root ${keyfile} && chmod ${expected_mode} ${keyfile}"
         else
@@ -134,20 +134,20 @@ while IFS= read -r -d '' keyfile; do
             success "  Fixed: ${keyfile}"
         fi
     else
-        success "  ${keyfile} — OK"
+        success "  ${keyfile} - OK"
     fi
 done < <(find /etc/ssh -maxdepth 1 -name 'ssh_host_*' -print0 2>/dev/null)
 
 echo ""
 
 # =============================================================================
-# Step 3 — Write drop-in hardening config
+# Step 3 - Write drop-in hardening config
 #
 # We use a drop-in file in sshd_config.d/ rather than editing sshd_config
 # directly. 
 # This means:
 #   - The original sshd_config is untouched
-#   - Our changes are isolated to one file — easy to remove or revert
+#   - Our changes are isolated to one file - easy to remove or revert
 #   - If something goes wrong, rm the drop-in and restart sshd to recover
 #   - sshd processes drop-in files in lexical order; 99- prefix ensures
 #     our settings are applied last and override earlier defaults
@@ -158,7 +158,7 @@ info "Step 3: Writing hardened SSH drop-in config..."
 ALLOW_USERS_LINE="AllowUsers ${ALLOWED_USERS[*]}"
 
 DROPIN_CONTENT="# =============================================================================
-# Blue Team SSH Hardening — applied by harden_ssh.sh
+# Blue Team SSH Hardening - applied by harden_ssh.sh
 # To revert: rm ${DROPIN_FILE} && systemctl restart sshd
 # =============================================================================
 
@@ -167,7 +167,7 @@ DROPIN_CONTENT="# ==============================================================
 # Keep password auth enabled 
 PasswordAuthentication yes
 
-# Deny root login entirely — use a privileged user account instead
+# Deny root login entirely - use a privileged user account instead
 PermitRootLogin no
 
 # Never allow empty passwords
@@ -177,15 +177,15 @@ PermitEmptyPasswords no
 # Eliminates a secondary auth pathway red team could abuse
 KbdInteractiveAuthentication no
 
-# Disable GSSAPI authentication — not used on this network, removes
+# Disable GSSAPI authentication - not used on this network, removes
 # a Kerberos-based auth pathway that has no legitimate use here
 GSSAPIAuthentication no
 
-# Disable host-based authentication — prevents trust relationships
+# Disable host-based authentication - prevents trust relationships
 # between hosts from being exploited for lateral movement
 HostbasedAuthentication no
 
-# Ignore .rhosts and .shosts files — these are ancient trust mechanisms
+# Ignore .rhosts and .shosts files - these are ancient trust mechanisms
 # that should never be used in a modern environment
 IgnoreRhosts yes
 
@@ -201,16 +201,16 @@ ${ALLOW_USERS_LINE}
 
 # -- Attack Surface Reduction --
 
-# Disable X11 forwarding — no GUI needed, removes a tunneling vector
+# Disable X11 forwarding - no GUI needed, removes a tunneling vector
 X11Forwarding no
 
 # Disable all forwarding in one directive (TCP, agent, X11)
 DisableForwarding yes
 
-# Disable TCP forwarding — prevents SSH being used as a tunnel/proxy
+# Disable TCP forwarding - prevents SSH being used as a tunnel/proxy
 AllowTcpForwarding no
 
-# Disable agent forwarding — prevents key forwarding attacks
+# Disable agent forwarding - prevents key forwarding attacks
 AllowAgentForwarding no
 
 # Disable SSH tunneling
@@ -225,13 +225,13 @@ PermitTunnel no
 # fail to connect after these are applied. Check journalctl -u sshd
 # immediately after reloading if scoring drops.
 
-# Key exchange — only Diffie-Hellman and ECDH with strong curves
+# Key exchange - only Diffie-Hellman and ECDH with strong curves
 KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521
 
-# Ciphers — AES-GCM and ChaCha20 only, all CBC-mode dropped
+# Ciphers - AES-GCM and ChaCha20 only, all CBC-mode dropped
 Ciphers chacha20-poly1305@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr,aes128-gcm@openssh.com,aes256-gcm@openssh.com
 
-# MACs — HMAC-SHA2 and ETM variants only, MD5 and SHA1 dropped
+# MACs - HMAC-SHA2 and ETM variants only, MD5 and SHA1 dropped
 MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha2-256,hmac-sha2-512
 
 # -- Session & Timeout --
@@ -253,7 +253,7 @@ MaxStartups 5
 
 # -- Logging --
 
-# Verbose logging — captures authentication attempts, key fingerprints
+# Verbose logging - captures authentication attempts, key fingerprints
 # Useful for intrusion detection during competition
 LogLevel VERBOSE
 "
@@ -271,7 +271,7 @@ else
 fi
 
 # =============================================================================
-# Step 4 — Validate configuration before restarting
+# Step 4 - Validate configuration before restarting
 #
 # sshd -t performs a full config test without actually restarting the daemon.
 # If this fails, we abort rather than restarting into a broken config and
@@ -295,10 +295,10 @@ else
 fi
 
 # =============================================================================
-# Step 5 — Audit authorized_keys files
+# Step 5 - Audit authorized_keys files
 #
 # Check every user's ~/.ssh/authorized_keys for keys that don't belong
-# to our team. We flag unauthorized keys but do NOT automatically remove them —
+# to our team. We flag unauthorized keys but do NOT automatically remove them -
 # removal is a manual decision to avoid accidentally removing a grey team key
 # =============================================================================
 info "Step 5: Auditing authorized_keys files..."
@@ -335,7 +335,7 @@ for home in "${AUTH_TARGETS[@]}"; do
         [[ "$line" == \#* ]] && continue
 
         if [[ ${#TEAM_PUBKEYS[@]} -eq 0 ]]; then
-            # No team keys configured — flag everything as unverified
+            # No team keys configured - flag everything as unverified
             warn "  UNVERIFIED KEY (no team keys configured): ${line:0:60}..."
             (( UNAUTH_FOUND++ )) || true
         elif [[ -z "${KNOWN_KEYS[$line]+_}" ]]; then
@@ -352,15 +352,15 @@ done
 
 echo ""
 if [[ "$UNAUTH_FOUND" -gt 0 ]]; then
-    warn "authorized_keys audit: ${UNAUTH_FOUND} unrecognized key(s) found — review manually"
+    warn "authorized_keys audit: ${UNAUTH_FOUND} unrecognized key(s) found - review manually"
 else
     success "authorized_keys audit: all keys accounted for"
 fi
 
 # =============================================================================
-# Step 6 — Restart sshd to apply changes
+# Step 6 - Restart sshd to apply changes
 #
-# We only reach this point if sshd -t passed. Do NOT use restart — use
+# We only reach this point if sshd -t passed. Do NOT use restart - use
 # reload where possible so existing sessions aren't dropped. On Debian,
 # systemctl reload sshd re-reads the config without killing active sessions.
 # =============================================================================
@@ -370,13 +370,13 @@ if $DRY_RUN; then
     dryrun "Would run: systemctl reload sshd"
 else
     if systemctl reload sshd; then
-        success "sshd reloaded successfully — new config is active"
+        success "sshd reloaded successfully - new config is active"
     else
-        warn "systemctl reload failed — attempting restart..."
+        warn "systemctl reload failed - attempting restart..."
         if systemctl restart sshd; then
             success "sshd restarted successfully"
         else
-            error "sshd failed to restart — check: journalctl -u sshd"
+            error "sshd failed to restart - check: journalctl -u sshd"
             exit 1
         fi
     fi
