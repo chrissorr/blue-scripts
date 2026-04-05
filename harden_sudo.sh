@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# harden_sudo.sh — Audit and harden sudo configuration on Debian 13 boxes
+# harden_sudo.sh - Audit and harden sudo configuration on Debian 13 boxes
 #
 # Usage:
 #   sudo ./harden_sudo.sh [--dry-run]
@@ -15,7 +15,7 @@
 #   4. Validates all sudoers changes with visudo -c before applying
 #
 # Safety:
-#   - NOPASSWD entries are never touched — scoring checkers may depend on them
+#   - NOPASSWD entries are never touched - scoring checkers may depend on them
 #   - visudo -c validates every file before and after changes
 #   - All modified files are backed up before editing
 #   - Confirmation prompt shows exactly what will be removed
@@ -25,23 +25,24 @@
 set -euo pipefail
 
 # =============================================================================
-# !! AUTHORIZED SUDO USERS — EDIT THIS BEFORE COMPETITION DAY !!
+# !! AUTHORIZED SUDO USERS - EDIT THIS BEFORE COMPETITION DAY !!
 #
 # Any user in /etc/sudoers or /etc/sudoers.d/ NOT in this list will be
 # flagged as unauthorized and queued for removal after confirmation.
 #
 # Known required accounts (from blue team packet):
-#   root        — always authorized, never touched
-#   GREYTEAM    — grey team oversight, MUST retain sudo if currently set
-#
+#   root        - always authorized, never touched
+#   GREYTEAM    - grey team oversight, MUST retain sudo if currently set
+#   scp343      - local linux admin user
 # =============================================================================
 AUTHORIZED_SUDO_USERS=(
     "root"
     "GREYTEAM"
+    "scp343"
 )
 
 # =============================================================================
-# !! AUTHORIZED SUDO GROUPS — EDIT THIS IF NEEDED !!
+# !! AUTHORIZED SUDO GROUPS - EDIT THIS IF NEEDED !!
 #
 # Group-based sudo grants are also checked. Standard Debian groups that
 # legitimately have sudo access are listed here.
@@ -81,12 +82,12 @@ fi
 
 if [[ "${1:-}" == "--dry-run" ]]; then
     DRY_RUN=true
-    warn "DRY-RUN mode — no changes will be made"
+    warn "DRY-RUN mode - no changes will be made"
     echo ""
 fi
 
 if ! command -v visudo &>/dev/null; then
-    error "visudo is not available — cannot safely edit sudoers"
+    error "visudo is not available - cannot safely edit sudoers"
     exit 1
 fi
 
@@ -102,7 +103,7 @@ for g in "${AUTHORIZED_SUDO_GROUPS[@]}"; do
 done
 
 # =============================================================================
-# Step 1 — Backup all sudoers files
+# Step 1 - Backup all sudoers files
 # =============================================================================
 info "Step 1: Backing up sudoers files..."
 
@@ -119,7 +120,7 @@ else
 fi
 
 # =============================================================================
-# Step 2 — Audit sudoers files
+# Step 2 - Audit sudoers files
 #
 # We parse each sudoers file looking for:
 #   - User privilege lines:  username  ALL=(ALL) ...
@@ -128,7 +129,7 @@ fi
 # We skip:
 #   - Comments (#)
 #   - Defaults lines (we add our own, not remove existing)
-#   - NOPASSWD entries entirely — too risky to touch
+#   - NOPASSWD entries entirely - too risky to touch
 #   - Aliases (User_Alias, Cmnd_Alias, etc.)
 #
 # Lines granting access to unauthorized users are collected and presented
@@ -153,7 +154,7 @@ declare -a FINDING_TYPE     # "user" or "group"
 declare -a FINDING_ENTITY   # the username or groupname
 
 for sudoers_file in "${SUDOERS_FILES[@]}"; do
-    # Skip our own drop-in if it already exists — we wrote it, it's authorized
+    # Skip our own drop-in if it already exists
     [[ "$sudoers_file" == "$DROPIN_FILE" ]] && continue
 
     info "Scanning: ${sudoers_file}"
@@ -168,7 +169,7 @@ for sudoers_file in "${SUDOERS_FILES[@]}"; do
         # Skip full-line comments
         [[ "$line" == \#* ]] && continue
 
-        # Skip Defaults lines — we handle those separately
+        # Skip Defaults lines - we handle those separately
         [[ "$line" =~ ^[[:space:]]*Defaults ]] && continue
 
         # Skip alias definitions
@@ -225,7 +226,7 @@ for sudoers_file in "${SUDOERS_FILES[@]}"; do
 done
 
 # =============================================================================
-# Step 3 — Present findings and prompt for confirmation
+# Step 3 - Present findings and prompt for confirmation
 # =============================================================================
 FINDING_COUNT=${#FINDING_FILE[@]}
 
@@ -259,7 +260,7 @@ else
         echo ""
 
         if [[ "$CONFIRM" != "YES" ]]; then
-            info "Removal skipped — no sudoers entries were changed."
+            info "Removal skipped - no sudoers entries were changed."
         else
             # Remove unauthorized lines from their respective files
             # We process each unique file once, removing all flagged lines from it
@@ -291,7 +292,7 @@ else
                     mv "$tmp" "$target_file"
                     success "Cleaned ${target_file}"
                 else
-                    error "visudo validation failed for cleaned ${target_file} — skipping"
+                    error "visudo validation failed for cleaned ${target_file} - skipping"
                     error "The original file has NOT been modified"
                     rm -f "$tmp"
                 fi
@@ -301,59 +302,166 @@ else
 fi
 
 # =============================================================================
-# Step 4 — Write hardening drop-in
+# Step 4 - Write hardening drop-in
 #
-# We add Defaults requiretty which requires sudo to be called from a
-# real terminal (tty). This directly disrupts privilege escalation from
-# reverse shells, which have no tty. We write this as a drop-in rather
-# than modifying /etc/sudoers directly.
+# We write a drop-in to /etc/sudoers.d/ with four Defaults hardening lines:
 #
-# We do NOT add this if it already exists anywhere in the sudoers config.
+#   requiretty        - sudo must be called from a real tty, directly
+#                       disrupts reverse shell privilege escalation
+#   use_pty           - forces sudo to allocate a pty even when requiretty
+#                       is satisfied, closes a bypass where some shells
+#                       fake tty presence
+#   logfile           - writes a dedicated sudo log separate from syslog,
+#                       makes it much easier to audit who ran what during
+#                       the competition
+#   timestamp_timeout - set to 0 so sudo always requires a password, no
+#                       grace period. Closes the window where red team
+#                       hijacks a session that recently ran sudo.
+#
+# Each directive is checked for pre-existence before writing to avoid
+# duplicates if the script is run more than once.
 # =============================================================================
-info "Step 4: Checking for requiretty..."
+info "Step 4: Writing sudo hardening drop-in..."
 
+# Check which directives are already present anywhere in sudoers config
 REQUIRETTY_EXISTS=false
+USE_PTY_EXISTS=false
+LOGFILE_EXISTS=false
+TIMESTAMP_EXISTS=false
+
 for sudoers_file in "${SUDOERS_FILES[@]}"; do
-    if grep -q "requiretty" "$sudoers_file" 2>/dev/null; then
-        REQUIRETTY_EXISTS=true
-        info "requiretty already present in ${sudoers_file} — skipping"
-        break
-    fi
+    [[ -f "$sudoers_file" ]] || continue
+    grep -q "requiretty"        "$sudoers_file" 2>/dev/null && REQUIRETTY_EXISTS=true
+    grep -q "use_pty"           "$sudoers_file" 2>/dev/null && USE_PTY_EXISTS=true
+    grep -q "logfile"           "$sudoers_file" 2>/dev/null && LOGFILE_EXISTS=true
+    grep -q "timestamp_timeout" "$sudoers_file" 2>/dev/null && TIMESTAMP_EXISTS=true
 done
 
-if ! $REQUIRETTY_EXISTS; then
-    DROPIN_CONTENT="# Blue Team sudo hardening — applied by harden_sudo.sh
+# Build drop-in content from only the directives that aren't already set
+DROPIN_LINES="# Blue Team sudo hardening - applied by harden_sudo.sh
 # To revert: rm ${DROPIN_FILE}
-
-# Require a real tty for sudo — prevents privilege escalation from
-# reverse shells and other non-interactive execution contexts
-Defaults requiretty
 "
 
+DROPIN_EMPTY=true
+
+if ! $REQUIRETTY_EXISTS; then
+    DROPIN_LINES+="
+# Require a real tty - prevents sudo from reverse shells and
+# non-interactive execution contexts
+Defaults requiretty"
+    DROPIN_EMPTY=false
+else
+    info "  requiretty already present - skipping"
+fi
+
+if ! $USE_PTY_EXISTS; then
+    DROPIN_LINES+="
+
+# Force allocation of a pty - closes bypasses where shells fake tty presence
+Defaults use_pty"
+    DROPIN_EMPTY=false
+else
+    info "  use_pty already present - skipping"
+fi
+
+if ! $LOGFILE_EXISTS; then
+    DROPIN_LINES+="
+
+# Dedicated sudo log file - easier to audit who ran what during competition
+Defaults logfile=\"/var/log/sudo.log\""
+    DROPIN_EMPTY=false
+else
+    info "  logfile already present - skipping"
+fi
+
+if ! $TIMESTAMP_EXISTS; then
+    DROPIN_LINES+="
+
+# Always require password - no grace period after a successful sudo
+# Closes the window where red team hijacks an already-authenticated session
+Defaults timestamp_timeout=0"
+    DROPIN_EMPTY=false
+else
+    info "  timestamp_timeout already present - skipping"
+fi
+
+if $DROPIN_EMPTY; then
+    info "  All hardening directives already present - no drop-in needed"
+else
     if $DRY_RUN; then
         dryrun "Would write drop-in to ${DROPIN_FILE}:"
         echo ""
-        echo "$DROPIN_CONTENT"
+        echo "$DROPIN_LINES"
+        echo ""
     else
-        # Write to temp file and validate before installing
         tmp=$(mktemp)
-        echo "$DROPIN_CONTENT" > "$tmp"
+        echo "$DROPIN_LINES" > "$tmp"
 
         if visudo -c -f "$tmp" &>/dev/null; then
             mv "$tmp" "$DROPIN_FILE"
             chmod 440 "$DROPIN_FILE"
-            success "Wrote requiretty drop-in to ${DROPIN_FILE}"
+            success "Wrote sudo hardening drop-in to ${DROPIN_FILE}"
         else
-            error "visudo validation failed for requiretty drop-in — not installed"
+            error "visudo validation failed for hardening drop-in - not installed"
+            error "Run visudo -c -f ${tmp} manually to diagnose"
             rm -f "$tmp"
         fi
     fi
 fi
 
+echo ""
+
 # =============================================================================
-# Step 5 — Final validation of entire sudoers configuration
+# Step 5 - Restrict the su command to the sudo group
+#
+# By default any user can attempt to su to root. Restricting su to only
+# members of the sudo group via PAM means red team accounts they create
+# cannot use su for privilege escalation even if they know the root password.
+#
+# This edits /etc/pam.d/su to add the pam_wheel.so restriction.
+# We check first - if it's already configured we skip it.
 # =============================================================================
-info "Step 5: Final sudoers configuration validation..."
+info "Step 5: Restricting su to sudo group members..."
+
+PAM_SU="/etc/pam.d/su"
+SU_RESTRICTION="auth required pam_wheel.so use_uid group=sudo"
+
+if [[ ! -f "$PAM_SU" ]]; then
+    warn "  ${PAM_SU} not found - skipping su restriction"
+elif grep -q "pam_wheel.so" "$PAM_SU" 2>/dev/null; then
+    info "  su restriction already configured in ${PAM_SU} - skipping"
+else
+    if $DRY_RUN; then
+        dryrun "Would add to ${PAM_SU}: ${SU_RESTRICTION}"
+    else
+        # Back up pam.d/su before modifying
+        cp "$PAM_SU" "${BACKUP_DIR}/pam_su.$(date +%Y%m%d_%H%M%S)"
+
+        # Insert our restriction after the first #%PAM line or at the top
+        # of the auth section. We prepend it before the first auth line so
+        # it is evaluated first.
+        tmp=$(mktemp)
+        awk -v restriction="$SU_RESTRICTION" '
+            /^auth/ && !added {
+                print restriction
+                added=1
+            }
+            { print }
+        ' "$PAM_SU" > "$tmp"
+
+        mv "$tmp" "$PAM_SU"
+        chmod 644 "$PAM_SU"
+        success "  Added su restriction to ${PAM_SU}"
+        info "  Only members of the sudo group can now use su"
+    fi
+fi
+
+echo ""
+
+# =============================================================================
+# Step 6 - Final validation of entire sudoers configuration
+# =============================================================================
+info "Step 6: Final sudoers configuration validation..."
 
 if $DRY_RUN; then
     dryrun "Would run: visudo -c"
@@ -383,6 +491,9 @@ else
 fi
 info "  Unauthorized found: ${FINDING_COUNT}"
 info "  requiretty:         $( $REQUIRETTY_EXISTS && echo 'already present' || echo 'added' )"
+info "  use_pty:            $( $USE_PTY_EXISTS && echo 'already present' || echo 'added' )"
+info "  sudo logfile:       $( $LOGFILE_EXISTS && echo 'already present' || echo 'added' )"
+info "  timestamp_timeout:  $( $TIMESTAMP_EXISTS && echo 'already present' || echo 'added' )"
 info "========================================="
 echo ""
 warn "REMINDER: NOPASSWD entries were NOT modified."
