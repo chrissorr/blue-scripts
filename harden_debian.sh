@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# harden_debian.sh — System-wide hardening for Debian 13 blue team boxes
+# harden_debian.sh - System-wide hardening for Debian 13 blue team boxes
 #
 # Usage:
 #   sudo ./harden_debian.sh [--dry-run]
@@ -16,7 +16,7 @@
 #
 # Safety:
 #   - World-writable and SUID findings prompt for confirmation before fixing
-#   - Attack tools are renamed not deleted — recoverable if scoring needs them
+#   - Attack tools are renamed not deleted - recoverable if scoring needs them
 #   - Sensitive file permissions are fixed automatically (low risk)
 #   - ld.so.preload unauthorized content prompts before clearing
 #   - Run with --dry-run to preview all actions without making changes
@@ -25,12 +25,12 @@
 set -euo pipefail
 
 # =============================================================================
-# !! ATTACK TOOLS — EDIT IF NEEDED !!
+# !! ATTACK TOOLS - EDIT IF NEEDED !!
 #
 # Binaries listed here will be renamed to <name>.disabled if found.
-# They are NOT deleted — recoverable by renaming back.
+# They are NOT deleted - recoverable by renaming back.
 #
-# curl and tcpdump are commented out by default — grey team scoring
+# curl and tcpdump are commented out by default - grey team scoring
 # checks may use curl to verify HTTP responses. Uncomment only if you
 # are certain scoring does not depend on them.
 # =============================================================================
@@ -44,13 +44,13 @@ ATTACK_TOOLS=(
     "make"
     "socat"
     "nmap"
-    # "curl"       # CAUTION — scoring checks may use this
-    # "wget"       # CAUTION — scoring checks may use this
-    # "tcpdump"    # CAUTION — may be used by monitoring scripts
+    # "curl"       # CAUTION - scoring checks may use this
+    # "wget"       # CAUTION - scoring checks may use this
+    # "tcpdump"    # CAUTION - may be used by monitoring scripts
 )
 
 # =============================================================================
-# !! AUTHORIZED SUID/SGID BINARIES — EDIT IF NEEDED !!
+# !! AUTHORIZED SUID/SGID BINARIES - EDIT IF NEEDED !!
 #
 # Any SUID/SGID binary NOT in this list will be flagged as suspicious.
 # This list covers standard Debian 13 expected SUID binaries.
@@ -81,25 +81,31 @@ AUTHORIZED_SUID=(
 )
 
 # =============================================================================
-# !! SENSITIVE FILES — permissions enforced automatically !!
+# !! SENSITIVE FILES - permissions enforced automatically !!
 #
 # Format: "path:owner:group:permissions"
 # These are the correct values for a standard Debian 13 system.
 # =============================================================================
 SENSITIVE_FILES=(
     "/etc/passwd:root:root:644"
+    "/etc/passwd-:root:root:600"
     "/etc/shadow:root:shadow:640"
+    "/etc/shadow-:root:shadow:640"
     "/etc/group:root:root:644"
+    "/etc/group-:root:root:644"
     "/etc/gshadow:root:shadow:640"
+    "/etc/gshadow-:root:shadow:640"
     "/etc/sudoers:root:root:440"
     "/etc/ssh/sshd_config:root:root:600"
     "/etc/crontab:root:root:600"
     "/etc/hosts:root:root:644"
     "/etc/hostname:root:root:644"
     "/etc/ld.so.preload:root:root:644"
+    "/etc/shells:root:root:644"
+    "/etc/security/opasswd:root:root:600"
 )
 
-# Directories where world-writable files are expected — skip these
+# Directories where world-writable files are expected - skip these
 WRITABLE_SKIP_DIRS=(
     "/tmp"
     "/var/tmp"
@@ -145,7 +151,7 @@ fi
 
 if [[ "${1:-}" == "--dry-run" ]]; then
     DRY_RUN=true
-    warn "DRY-RUN mode — no changes will be made"
+    warn "DRY-RUN mode - no changes will be made"
     echo ""
 fi
 
@@ -165,10 +171,10 @@ for d in "${WRITABLE_SKIP_DIRS[@]}"; do
 done
 
 # =============================================================================
-# Step 1 — Sensitive file permissions
+# Step 1 - Sensitive file permissions
 #
 # For each sensitive file we check and enforce owner, group, and mode.
-# These corrections are applied automatically — the risk of getting these
+# These corrections are applied automatically - the risk of getting these
 # wrong is low and the benefit of correct permissions is immediate.
 # Files that don't exist yet (like ld.so.preload) are skipped silently.
 # =============================================================================
@@ -179,7 +185,7 @@ for entry in "${SENSITIVE_FILES[@]}"; do
     IFS=: read -r filepath owner group mode <<< "$entry"
 
     if [[ ! -e "$filepath" ]]; then
-        info "  ${filepath} does not exist — skipping"
+        info "  ${filepath} does not exist - skipping"
         continue
     fi
 
@@ -208,11 +214,11 @@ for entry in "${SENSITIVE_FILES[@]}"; do
     fi
 
     if ! $NEEDS_FIX; then
-        success "  ${filepath} — OK (${owner}:${group} ${mode})"
+        success "  ${filepath} - OK (${owner}:${group} ${mode})"
         continue
     fi
 
-    warn "  ${filepath} — NEEDS FIX: ${ISSUES[*]}"
+    warn "  ${filepath} - NEEDS FIX: ${ISSUES[*]}"
 
     if $DRY_RUN; then
         dryrun "  Would run: chown ${owner}:${group} ${filepath} && chmod ${mode} ${filepath}"
@@ -226,7 +232,7 @@ done
 echo ""
 
 # =============================================================================
-# Step 2 — /etc/ld.so.preload audit
+# Step 2 - /etc/ld.so.preload audit
 #
 # This file is the target of our own red team LD_PRELOAD persistence
 # technique. If it exists and contains anything, that's a red flag.
@@ -238,15 +244,15 @@ echo ""
 LD_PRELOAD_FILE="/etc/ld.so.preload"
 
 if [[ ! -f "$LD_PRELOAD_FILE" ]]; then
-    success "  /etc/ld.so.preload does not exist — clean"
+    success "  /etc/ld.so.preload does not exist - clean"
 elif [[ ! -s "$LD_PRELOAD_FILE" ]]; then
-    success "  /etc/ld.so.preload is empty — clean"
+    success "  /etc/ld.so.preload is empty - clean"
 else
     warn "  /etc/ld.so.preload EXISTS and contains:"
     echo ""
     cat "$LD_PRELOAD_FILE"
     echo ""
-    warn "  This file is used for LD_PRELOAD persistence — likely red team backdoor"
+    warn "  This file is used for LD_PRELOAD persistence - likely red team backdoor"
 
     if $DRY_RUN; then
         dryrun "Would prompt to clear /etc/ld.so.preload"
@@ -256,7 +262,7 @@ else
             > "$LD_PRELOAD_FILE"
             success "  Cleared /etc/ld.so.preload (backup saved)"
         else
-            warn "  Skipped — ld.so.preload NOT cleared"
+            warn "  Skipped - ld.so.preload NOT cleared"
         fi
     fi
 fi
@@ -264,7 +270,7 @@ fi
 echo ""
 
 # =============================================================================
-# Step 3 — World-writable file audit
+# Step 3 - World-writable file audit
 #
 # World-writable files outside of expected temp directories are unusual
 # and give red team a place to drop payloads or modify shared resources.
@@ -311,7 +317,7 @@ else
                 chmod o-w "$f" && success "  Fixed: ${f}" || warn "  Failed to fix: ${f}"
             done
         else
-            warn "  Skipped — world-writable files NOT modified"
+            warn "  Skipped - world-writable files NOT modified"
         fi
     fi
 fi
@@ -319,10 +325,10 @@ fi
 echo ""
 
 # =============================================================================
-# Step 4 — SUID/SGID binary audit
+# Step 4 - SUID/SGID binary audit
 #
 # SUID binaries run with the file owner's privileges regardless of who
-# executes them — a common privilege escalation vector. We find all
+# executes them - a common privilege escalation vector. We find all
 # SUID/SGID binaries and flag any not in our allowlist.
 # =============================================================================
 info "Step 4: Auditing SUID/SGID binaries..."
@@ -350,7 +356,7 @@ else
         warn "  ${perms}"
     done
     echo ""
-    warn "  Review each carefully — some may be legitimate installed packages"
+    warn "  Review each carefully - some may be legitimate installed packages"
 
     if $DRY_RUN; then
         dryrun "Would prompt to remove SUID/SGID bit from findings"
@@ -360,7 +366,7 @@ else
                 chmod ug-s "$f" && success "  Removed SUID/SGID: ${f}" || warn "  Failed: ${f}"
             done
         else
-            warn "  Skipped — SUID/SGID bits NOT modified"
+            warn "  Skipped - SUID/SGID bits NOT modified"
         fi
     fi
 fi
@@ -368,7 +374,7 @@ fi
 echo ""
 
 # =============================================================================
-# Step 5 — Attack tool disabling
+# Step 5 - Attack tool disabling
 #
 # Offensive tools are renamed to <binary>.disabled rather than deleted.
 # This breaks them for red team while keeping them recoverable if a
@@ -414,11 +420,11 @@ fi
 echo ""
 
 # =============================================================================
-# Step 6 — Cron audit
+# Step 6 - Cron audit
 #
 # Red team persistence often lives in cron. We scan all cron locations
 # and print their contents for manual review. We don't auto-remove
-# anything here — cron entries can be subtle and removal is a manual call.
+# anything here - cron entries can be subtle and removal is a manual call.
 # =============================================================================
 info "Step 6: Auditing cron entries..."
 echo ""
@@ -450,11 +456,11 @@ for location in "${CRON_LOCATIONS[@]}"; do
             done
             (( CRON_FINDINGS++ )) || true
         else
-            info "  ${location} — empty or comments only"
+            info "  ${location} - empty or comments only"
         fi
 
     elif [[ -d "$location" ]]; then
-        # Directory — scan each file inside
+        # Directory - scan each file inside
         while IFS= read -r -d '' f; do
             content=$(grep -v '^#' "$f" | grep -v '^[[:space:]]*$' || true)
             if [[ -n "$content" ]]; then
@@ -472,7 +478,7 @@ echo ""
 if [[ "$CRON_FINDINGS" -eq 0 ]]; then
     success "  No active cron entries found"
 else
-    warn "  ${CRON_FINDINGS} cron file(s) with active entries — review manually"
+    warn "  ${CRON_FINDINGS} cron file(s) with active entries - review manually"
     warn "  Remove suspicious entries with: crontab -r -u <username>"
     warn "  Or edit directly: crontab -e -u <username>"
 fi
@@ -480,14 +486,52 @@ fi
 echo ""
 
 # =============================================================================
-# Step 7 — Process and port snapshot
+# Step 7 - Unowned file audit
+#
+# Files with no valid owner or group exist when a user is deleted but their
+# files are not cleaned up, or when red team drops files under a temporary
+# account they then remove. These are prime targets for privilege escalation
+# and should be reviewed and re-owned or deleted.
+#
+# We report findings but do not automatically remove or re-own - too risky
+# to automate without knowing what the files are.
+# =============================================================================
+info "Step 7: Auditing files with no valid owner or group..."
+echo ""
+
+UNOWNED_COUNT=0
+
+while IFS= read -r -d '' f; do
+    warn "  UNOWNED FILE: ${f}"
+    stat -c '    owner: %U  group: %G  mode: %a' "$f" >&2
+    (( UNOWNED_COUNT++ )) || true
+done < <(find / \
+    -path /proc -prune -o \
+    -path /sys -prune -o \
+    \( -nouser -o -nogroup \) \
+    -type f \
+    -print0 2>/dev/null || true)
+
+echo ""
+if [[ "$UNOWNED_COUNT" -eq 0 ]]; then
+    success "  No unowned files found"
+else
+    warn "  ${UNOWNED_COUNT} unowned file(s) found - review and re-own or delete manually"
+    warn "  To re-own: chown root:root <file>"
+    warn "  To find all unowned files again: find / -nouser -o -nogroup 2>/dev/null"
+fi
+
+echo ""
+
+# =============================================================================
+# Step 8 - Process and port snapshot
 #
 # Capture a baseline of what is running and what ports are listening.
 # Saved to /root/system_snapshot/ for comparison during the competition.
 # Running this again later and diffing the output reveals new processes
 # or listeners that red team has started.
 # =============================================================================
-info "Step 7: Capturing system snapshot..."
+info "Step 8: Capturing system snapshot..."
 echo ""
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -532,8 +576,9 @@ info "  World-writable:    ${#WRITABLE_FILES[@]} found"
 info "  Suspicious SUID:   ${#SUSPICIOUS_SUID[@]} found"
 info "  Attack tools:      ${#FOUND_TOOLS[@]} found"
 info "  Cron files:        ${CRON_FINDINGS} with active entries"
+info "  Unowned files:     ${UNOWNED_COUNT} found"
 info "========================================="
 echo ""
 warn "REMINDER: Cron findings require MANUAL review."
-warn "REMINDER: Attack tools renamed to .disabled — recoverable if needed."
+warn "REMINDER: Attack tools renamed to .disabled - recoverable if needed."
 warn "REMINDER: Re-run this script periodically to catch new red team changes."
