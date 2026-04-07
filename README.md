@@ -10,16 +10,22 @@ Simple scripts for quickly securing Debian boxes during competition.
 ## Scripts
 
 ### Core Hardening
-- **harden_debian.sh** — system audit + cleanup
-- **harden_firewall.sh** — UFW rules
-- **harden_ssh.sh** — SSH lockdown + key audit
-- **harden_sudo.sh** — remove bad sudo access
-- **harden_sysctl.sh** — kernel hardening
+- **harden_debian.sh** - system audit + cleanup
+- **harden_firewall.sh** - UFW rules
+- **harden_ssh.sh** - SSH lockdown + key audit
+- **harden_sudo.sh** - remove bad sudo access
+- **harden_sysctl.sh** - kernel hardening
+
+### Apache Hardening
+- **harden_apache.sh** - general hardening of apache service
 
 ### Active Response
-- **kill_sessions.sh** — kill attacker SSH sessions
-- **remove_users.sh** — remove unauthorized users
-- **rotate_creds.sh** — rotate passwords
+- **triage.sh** - provides prioritized report for needed actions
+- **kill_sessions.sh** - kill attacker SSH sessions
+- **remove_users.sh** - remove unauthorized users
+- **rotate_creds.sh** - rotate passwords
+- **proc_monitor.sh** - flag suspicious/unexpected processes
+- **log_monitor.sh** - highlight suspicious logs
 
 ## Recommended Order
 
