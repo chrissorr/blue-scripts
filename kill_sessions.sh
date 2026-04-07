@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# kill_sessions.sh — Drop all SSH sessions except your own and grey team
+# kill_sessions.sh - Drop all SSH sessions except your own and grey team
 #
 # Usage:
 #   sudo ./kill_sessions.sh
@@ -17,7 +17,7 @@
 #   - Your own session is protected by SOURCE IP matching, not username.
 #     If red team is using your username from their IP, their session is
 #     killed while yours (from your IP) is kept.
-#   - Console sessions (tty1, tty2, etc.) are explicitly skipped — only
+#   - Console sessions (tty1, tty2, etc.) are explicitly skipped - only
 #     pts (SSH) sessions are eligible for killing.
 #   - GREYTEAM username is always preserved.
 #   - Any session originating from the grey team subnet is always preserved.
@@ -27,13 +27,13 @@
 set -euo pipefail
 
 # =============================================================================
-# !! CONFIGURATION — EDIT IF NEEDED !!
+# !! CONFIGURATION - EDIT IF NEEDED !!
 #
-# Grey team subnet — any session whose source IP falls in this range will be preserved regardless of username.
+# Grey team subnet - any session whose source IP falls in this range will be preserved regardless of username.
 # From the blue team packet topology: grey team is on 10.10.10.200/24
 # =============================================================================
 GREYTEAM_USER="GREYTEAM"
-GREYTEAM_SUBNET="10.10.10.200"   # Used as a prefix match — see note below
+GREYTEAM_SUBNET="10.10.10.200"   # Used as a prefix match - see note below
 
 # We match grey team IPs by prefix rather than full CIDR parsing to keep
 # this pure bash with no dependencies. Adjust the prefix to match the
@@ -65,19 +65,19 @@ fi
 # =============================================================================
 # Identify our own session
 #
-# MY_TTY — our current terminal device, stripped of /dev/ prefix.
+# MY_TTY - our current terminal device, stripped of /dev/ prefix.
 #   If we are on a console (tty1, tty2, etc.) this will be ttyN.
 #   If we are on SSH it will be pts/N.
-#   Console sessions are skipped entirely — who only shows them without
+#   Console sessions are skipped entirely - who only shows them without
 #   a source IP, and pkill -t cannot safely target them.
 #
-# MY_IP — the source IP of our current SSH session, extracted from the
+# MY_IP - the source IP of our current SSH session, extracted from the
 #   SSH_CONNECTION environment variable which sshd sets automatically.
 #   Format: "client_ip client_port server_ip server_port"
 #   We use this to protect our session by IP rather than username, so
 #   even if red team is logged in as the same user we can still kill
 #   their session without touching ours.
-#   If MY_IP is empty we are on a console — no SSH session to protect.
+#   If MY_IP is empty we are on a console - no SSH session to protect.
 # =============================================================================
 MY_TTY=$(tty 2>/dev/null | sed 's|/dev/||')
 MY_IP=$(echo "${SSH_CONNECTION:-}" | awk '{print $1}')
@@ -85,7 +85,7 @@ MY_IP=$(echo "${SSH_CONNECTION:-}" | awk '{print $1}')
 if [[ -n "$MY_IP" ]]; then
     info "Your current session: ${MY_TTY} from ${MY_IP}"
 else
-    info "Your current session: ${MY_TTY} (console — not an SSH session)"
+    info "Your current session: ${MY_TTY} (console - not an SSH session)"
 fi
 echo ""
 
@@ -96,7 +96,7 @@ echo ""
 #   username   pts/0   2026-04-03 12:34  (10.10.10.50)
 #
 # Fields: $1=username $2=pts $3=date $4=time $5=source_ip
-# The source IP is wrapped in parentheses — we strip those.
+# The source IP is wrapped in parentheses - we strip those.
 # =============================================================================
 
 declare -a SESSION_USERS
@@ -111,12 +111,15 @@ while IFS= read -r line; do
     [[ -z "$line" ]] && continue
 
     username=$(echo "$line" | awk '{print $1}')
-    pts=$(echo "$line" | awk '{print $2}')
-    source_raw=$(echo "$line" | awk '{print $NF}')
 
-    # Strip parentheses from source IP field if present
-    source_ip="${source_raw//(/}"
-    source_ip="${source_ip//)/}"
+    # Extract the pts/tty field by pattern rather than position
+    pts=$(echo "$line" | grep -oP '(pts/\d+|tty\d+|seat\d*)' | head -1 || true)
+
+    # Source IP is always the last field wrapped in parentheses
+    source_raw=$(echo "$line" | grep -oP '\(\K[^)]+' || true)
+
+    # source_raw already has parentheses stripped by the grep pattern above
+    source_ip="${source_raw:-console}"
 
     # -- Skip console sessions entirely --
     # Console logins appear as tty1, tty2, etc. in who output.
@@ -128,7 +131,7 @@ while IFS= read -r line; do
         SESSION_IPS+=("console")
         SESSION_PIDS+=("N/A")
         SESSION_ACTION+=("SKIP")
-        SESSION_REASON+=("console session — never killed")
+        SESSION_REASON+=("console session - never killed")
         continue
     fi
 
@@ -216,7 +219,7 @@ echo "============================================================"
 echo ""
 
 if [[ "$KILL_COUNT" -eq 0 ]]; then
-    info "No sessions to kill — only your own and/or grey team sessions are active."
+    info "No sessions to kill - only your own and/or grey team sessions are active."
     exit 0
 fi
 
@@ -227,7 +230,7 @@ read -r -p "  Proceed? Type YES to confirm: " CONFIRM
 echo ""
 
 if [[ "$CONFIRM" != "YES" ]]; then
-    info "Aborted — no sessions were killed."
+    info "Aborted - no sessions were killed."
     exit 0
 fi
 
@@ -235,7 +238,7 @@ fi
 # Kill target sessions
 #
 # We send SIGHUP to the sshd child process that owns the session.
-# SIGHUP is the standard signal for hangup — it's what happens when a
+# SIGHUP is the standard signal for hangup - it's what happens when a
 # terminal is closed naturally. It's cleaner than SIGKILL and gives the
 # shell a chance to clean up.
 #
@@ -259,16 +262,16 @@ for i in "${!SESSION_USERS[@]}"; do
     info "Dropping: ${username} on ${pts} (source: ${SESSION_IPS[$i]})"
 
     if [[ "$pid" != "unknown" ]] && kill -HUP "$pid" 2>/dev/null; then
-        success "  Sent SIGHUP to sshd PID ${pid} — session dropped"
+        success "  Sent SIGHUP to sshd PID ${pid} - session dropped"
         (( KILLED++ )) || true
     else
-        # Fallback — kill any process using this pts
-        warn "  Could not find sshd PID — attempting fallback via pts..."
+        # Fallback - kill any process using this pts
+        warn "  Could not find sshd PID - attempting fallback via pts..."
         if pkill -HUP -t "/dev/$pts" 2>/dev/null; then
             success "  Session dropped via pts fallback"
             (( KILLED++ )) || true
         else
-            error "  Failed to drop session for ${username} on ${pts} — manual kill may be needed"
+            error "  Failed to drop session for ${username} on ${pts} - manual kill may be needed"
             error "  Try: ps aux | grep sshd | grep ${pts}"
             (( FAILED++ )) || true
         fi
