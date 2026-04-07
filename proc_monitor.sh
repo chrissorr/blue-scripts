@@ -28,19 +28,33 @@ WATCH_INTERVAL=30
 # Processes owned by users not in this list will be flagged
 # =============================================================================
 LEGITIMATE_USERS=(
+    # Standard system accounts
     "root"
     "daemon"
-    "www-data"
-    "mysql"
+    "nobody"
     "systemd"
+    "systemd-timesync"
+    "systemd-network"
+    "systemd-resolve"
     "messagebus"
     "syslog"
-    "nobody"
+    "avahi"
+    "polkitd"
+    "rtkit"
+    "colord"
+    "usbmux"
+    "kernoops"
+    "whoopsie"
+    "speech-dispatcher"
+    "fwupd-refresh"
+    # Service accounts
+    "www-data"
+    "mysql"
+    "postgres"
+    # Competition accounts
     "cyberrange"
     "GREYTEAM"
-    # --- ADD SUPPLEMENTAL PACKET USERS BELOW ---
-    # "privileged_user"
-    # "standard_user"
+    "scp343"
 )
 
 # =============================================================================
@@ -73,16 +87,18 @@ SUSPICIOUS_PATTERNS=(
 LEGITIMATE_PATHS=(
     "/usr/bin/"
     "/usr/sbin/"
+    "/usr/lib/"
+    "/usr/libexec/"      # Debian 13 moved many daemons here
+    "/lib/"
     "/bin/"
     "/sbin/"
-    "/usr/lib/"
-    "/lib/"
     "/usr/local/bin/"
     "/usr/local/sbin/"
     "/usr/local/lib/"
     "/usr/share/"
     "/var/www/"
     "/opt/"
+    "/run/user/"         # User runtime daemons (dbus session, etc.)
 )
 
 # =============================================================================
@@ -150,8 +166,14 @@ run_snapshot() {
             owner=$(stat -c '%U' "/proc/$pid" 2>/dev/null || echo "unknown")
             conn=$(ss -tnpu 2>/dev/null | grep "pid=${pid}" | \
                 awk '{print $5 " -> " $6}' | head -3 | tr '\n' ' ')
-            warn "PID ${pid} [${owner}]: ${cmd:0:80}"
-            echo "       Connections: ${conn}"
+            # Only flag as suspicious if owner is unknown
+            if [[ -z "${LEGIT_USER_SET[$owner]+_}" ]]; then
+                crit "PID ${pid} [${owner}] UNKNOWN OWNER with network: ${cmd:0:80}"
+                echo "       Connections: ${conn}"
+            else
+                info "PID ${pid} [${owner}]: ${cmd:0:60}"
+                echo "       Connections: ${conn}"
+            fi
         done
     fi
 
@@ -172,8 +194,11 @@ run_snapshot() {
         CURRENT_PIDS["$pid"]=1
 
         # -- Check 1: unexpected owner --
+        # Only flag if the owner is completely unknown to us.
+        # Known users (even non-root) running normal processes are fine -
+        # the path check below will catch if they're running from odd locations.
         if [[ -z "${LEGIT_USER_SET[$owner]+_}" ]]; then
-            crit "PID ${pid} owned by unexpected user '${owner}': ${cmd:0:80}"
+            crit "PID ${pid} owned by UNKNOWN user '${owner}': ${cmd:0:80}"
             (( SUSPICIOUS_COUNT++ )) || true
             continue
         fi
