@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# triage.sh - Comprehensive system triage for compromised debian boxes
+# triage.sh - Rapid situational awareness for competition day
 #
 # Usage:
 #   sudo ./triage.sh [--full]
@@ -75,12 +75,13 @@ while IFS=: read -r user _ uid _ _ home shell; do
     echo "    ${user} (uid=${uid}, home=${home}, shell=${shell})${locked}"
 done < /etc/passwd
 
-# Accounts with no password
+# Accounts with genuinely empty passwords (not locked - locked is fine)
+# Empty password field means anyone can log in as that user with no password
 echo ""
 info "Checking for accounts with empty passwords..."
-no_pw=$(awk -F: '($2=="" || $2=="!!" || $2=="!"){print $1}' /etc/shadow 2>/dev/null || true)
+no_pw=$(awk -F: '$2=="" {print $1}' /etc/shadow 2>/dev/null || true)
 if [[ -n "$no_pw" ]]; then
-    crit "Accounts with no/locked password: ${no_pw}"
+    crit "Accounts with EMPTY password (no auth required): ${no_pw}"
 else
     ok "No accounts with empty passwords"
 fi
@@ -175,38 +176,79 @@ fi
 
 # =============================================================================
 # Section 4 - Cron & Scheduled Tasks
+#
+# Strategy: scan ALL cron files for suspicious content regardless of filename.
+# Known system cron files that are clean are noted but not fully printed.
+# Non-system files are always fully printed.
+# Any file containing suspicious patterns is always flagged with the
+# specific matching lines shown - a poisoned system cron file will still
+# be caught even if its filename looks legitimate.
 # =============================================================================
 header "4. CRON & SCHEDULED TASKS"
 
-CRON_LOCATIONS=(
+# Known Debian system cron files - these are checked for suspicious content
+# but not fully printed if clean. A poisoned version will still be flagged.
+SYSTEM_CRON_FILES=(
     "/etc/crontab"
-    "/etc/cron.d"
-    "/etc/cron.hourly"
-    "/etc/cron.daily"
-    "/etc/cron.weekly"
-    "/etc/cron.monthly"
-    "/var/spool/cron/crontabs"
+    "/etc/cron.d/e2scrub_all"
+    "/etc/cron.d/anacron"
+    "/etc/cron.daily/dpkg"
+    "/etc/cron.daily/man-db"
+    "/etc/cron.daily/0anacron"
+    "/etc/cron.daily/apt-compat"
+    "/etc/cron.daily/logrotate"
+    "/etc/cron.weekly/man-db"
+    "/etc/cron.weekly/0anacron"
+    "/etc/cron.monthly/0anacron"
 )
 
+declare -A SYSTEM_CRON_SET
+for f in "${SYSTEM_CRON_FILES[@]}"; do
+    SYSTEM_CRON_SET["$f"]=1
+done
+
+# Suspicious patterns to flag in any cron file regardless of source
+CRON_SUSPICIOUS_PATTERN='\/dev\/tcp|\/dev\/udp|bash\s+-i|nc\s+-|ncat\s|socat\s|python.*socket|curl\s.*\|\s*bash|wget\s.*\|\s*bash|base64\s+-d|mkfifo|\/tmp\/\.|\/var\/tmp\/\.'
+
 CRON_HITS=0
-for loc in "${CRON_LOCATIONS[@]}"; do
+SYSTEM_CRON_CLEAN=0
+
+# Collect all cron file locations to scan
+ALL_CRON_FILES=()
+for loc in /etc/crontab /etc/cron.d /etc/cron.hourly /etc/cron.daily \
+           /etc/cron.weekly /etc/cron.monthly /var/spool/cron/crontabs; do
     [[ -e "$loc" ]] || continue
     if [[ -f "$loc" ]]; then
-        content=$(grep -v '^\s*#\|^\s*$' "$loc" 2>/dev/null || true)
+        ALL_CRON_FILES+=("$loc")
+    elif [[ -d "$loc" ]]; then
+        while IFS= read -r -d '' f; do
+            ALL_CRON_FILES+=("$f")
+        done < <(find "$loc" -maxdepth 1 -type f -print0 2>/dev/null)
+    fi
+done
+
+for f in "${ALL_CRON_FILES[@]}"; do
+    is_system=false
+    [[ -n "${SYSTEM_CRON_SET[$f]+_}" ]] && is_system=true
+
+    # Always scan for suspicious patterns regardless of file origin
+    suspicious_lines=$(grep -nP "$CRON_SUSPICIOUS_PATTERN" "$f" 2>/dev/null || true)
+
+    if [[ -n "$suspicious_lines" ]]; then
+        crit "SUSPICIOUS content in cron file ${f}:"
+        echo "$suspicious_lines" | sed 's/^/    /'
+        (( CRON_HITS++ )) || true
+    elif $is_system; then
+        # System file with no suspicious content - just note it's clean
+        (( SYSTEM_CRON_CLEAN++ )) || true
+    else
+        # Non-system file - show full contents even if not suspicious
+        content=$(grep -v '^\s*#\|^\s*$' "$f" 2>/dev/null || true)
         if [[ -n "$content" ]]; then
-            warn "Active entries in ${loc}:"
+            warn "Non-standard cron file ${f}:"
             echo "$content" | sed 's/^/    /'
             (( CRON_HITS++ )) || true
         fi
-    elif [[ -d "$loc" ]]; then
-        while IFS= read -r -d '' f; do
-            content=$(grep -v '^\s*#\|^\s*$' "$f" 2>/dev/null || true)
-            if [[ -n "$content" ]]; then
-                warn "Active entries in ${f}:"
-                echo "$content" | sed 's/^/    /'
-                (( CRON_HITS++ )) || true
-            fi
-        done < <(find "$loc" -maxdepth 1 -type f -print0 2>/dev/null)
     fi
 done
 
@@ -217,13 +259,23 @@ while IFS=: read -r user _ uid _ _ _ _; do
     ctab=$(crontab -l -u "$user" 2>/dev/null \
         | grep -v '^\s*#\|^\s*$' || true)
     if [[ -n "$ctab" ]]; then
-        warn "Crontab for user ${user}:"
-        echo "$ctab" | sed 's/^/    /'
+        # Check for suspicious content first
+        suspicious=$(echo "$ctab" | grep -P "$CRON_SUSPICIOUS_PATTERN" || true)
+        if [[ -n "$suspicious" ]]; then
+            crit "SUSPICIOUS content in crontab for ${user}:"
+            echo "$suspicious" | sed 's/^/    /'
+        else
+            warn "User crontab for ${user} (review manually):"
+            echo "$ctab" | sed 's/^/    /'
+        fi
         (( CRON_HITS++ )) || true
     fi
 done < /etc/passwd
 
-[[ "$CRON_HITS" -eq 0 ]] && ok "No active cron entries found"
+if [[ "$CRON_HITS" -eq 0 ]]; then
+    ok "No unexpected or suspicious cron entries found"
+    info "  ${SYSTEM_CRON_CLEAN} standard system cron file(s) scanned and clean"
+fi
 
 # at jobs
 echo ""
@@ -300,20 +352,28 @@ done
 # =============================================================================
 header "6. SYSTEMD SERVICES & TIMERS"
 
-info "Non-standard enabled services:"
-systemctl list-unit-files --type=service --state=enabled 2>/dev/null \
-    | grep -v '^\(UNIT\|auditd\|cron\|dbus\|getty\|networking\|rsyslog\|ssh\|systemd\|apache2\|mysql\|mariadb\|ufw\|apparmor\|loaded\)' \
+# Known standard Debian 13 desktop services - suppress these
+KNOWN_SERVICES="auditd|cron|dbus|getty|networking|rsyslog|ssh|systemd|apache2|mysql|mariadb|ufw|apparmor|accounts-daemon|anacron|avahi-daemon|bluetooth|console-setup|cups|e2scrub|grub-common|keyboard-setup|low-memory-monitor|ModemManager|NetworkManager|open-vm-tools|power-profiles-daemon|switcheroo-control|udisks2|vgauth|wpa_supplicant|wtmpdb|gdm|plymouth|polkit|rtkit|colord|fwupd|packagekit|snapd"
+
+info "Unexpected enabled services (non-standard for Debian 13):"
+UNEXPECTED_SERVICES=$(systemctl list-unit-files --type=service --state=enabled 2>/dev/null \
     | grep "enabled" \
-    | while IFS= read -r line; do
+    | grep -vP "^(UNIT|${KNOWN_SERVICES})" || true)
+
+if [[ -n "$UNEXPECTED_SERVICES" ]]; then
+    echo "$UNEXPECTED_SERVICES" | while IFS= read -r line; do
         warn "    ${line}"
-    done || ok "No unexpected enabled services found"
+    done
+else
+    ok "No unexpected enabled services found"
+fi
 
 echo ""
-info "Active systemd timers:"
-systemctl list-timers --all 2>/dev/null | grep -v "^NEXT\|^$\|timers listed" \
-    | while IFS= read -r line; do
-        echo "    ${line}"
-    done
+info "Active systemd timers (summary):"
+systemctl list-timers --all 2>/dev/null \
+    | grep -v "^NEXT\|^$\|timers listed" \
+    | awk '{print "    " $1 " | " $5 " " $6}' \
+    | head -15
 
 # =============================================================================
 # Section 7 - Network Connections & Listening Ports
@@ -327,15 +387,19 @@ done
 
 echo ""
 info "Established outbound connections (potential callbacks):"
-OUTBOUND=$(ss -tnpu state established 2>/dev/null \
-    | grep -v '127\.\|::1' || true)
-if [[ -n "$OUTBOUND" ]]; then
-    warn "Established outbound connections found:"
-    echo "$OUTBOUND" | while IFS= read -r line; do
+# Filter out known legitimate outbound connections:
+#   - DHCP (port 67/68) - NetworkManager
+#   - SSH port 22 - our own and grey team sessions
+#   - Loopback addresses
+SUSPICIOUS_OUTBOUND=$(ss -tnpu state established 2>/dev/null \
+    | grep -v '127\.\|::1\|:22 \|:67 \|:68 ' || true)
+if [[ -n "$SUSPICIOUS_OUTBOUND" ]]; then
+    crit "Unexpected outbound connections - potential callbacks:"
+    echo "$SUSPICIOUS_OUTBOUND" | while IFS= read -r line; do
         warn "    ${line}"
     done
 else
-    ok "No suspicious established outbound connections"
+    ok "No unexpected outbound connections"
 fi
 
 # =============================================================================
