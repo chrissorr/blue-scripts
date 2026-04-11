@@ -27,6 +27,7 @@ set -euo pipefail
 # =============================================================================
 ROTATE_USERS=(
     "cyberrange"
+    "ntf"
 )
 
 # =============================================================================
@@ -39,7 +40,10 @@ PASSWORD_LENGTH=12
 # do not remove GREYTEAM from this list
 NEVER_ROTATE=(
     "GREYTEAM"
-    "root"
+    "SQL_APACHE_GREYTEAM"
+    "SCORER_GREYTEAM"
+    "SCP073"
+    "SCP343"
 )
 
 # =============================================================================

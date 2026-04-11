@@ -47,9 +47,7 @@ set -euo pipefail
 # Format: "port/protocol" e.g. "3306/tcp" for MySQL, "5432/tcp" for Postgres
 # =============================================================================
 EXTRA_INBOUND_PORTS=(
-    # "3306/tcp"   # MySQL/MariaDB - add if scoring checks DB directly
-    # "5432/tcp"   # PostgreSQL
-    # "8080/tcp"   # Alternative HTTP
+    "3306/tcp"   # MySQL
 )
 
 # =============================================================================
@@ -59,7 +57,7 @@ EXTRA_INBOUND_PORTS=(
 # This must never be blocked regardless of any other rule.
 # From the blue team packet topology: grey team is at 10.10.10.200/24
 # =============================================================================
-GREYTEAM_SUBNET="10.10.10.200/24"
+GREYTEAM_SUBNET="10.10.10.200/28"
 
 # =============================================================================
 # Configuration

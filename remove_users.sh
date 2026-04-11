@@ -25,8 +25,12 @@ set -euo pipefail
 # !! PROTECTED USERS — EDIT THIS BEFORE COMPETITION DAY !!
 # =============================================================================
 PROTECTED_USERS=(
-    "cyberrange"
     "GREYTEAM"
+    "SQL_APACHE_GREYTEAM"
+    "SCORER_GREYTEAM"
+    "SCP073"
+    "SCP343"
+    "ntf"
 )
 
 # =============================================================================

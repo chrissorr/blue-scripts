@@ -38,7 +38,10 @@ set -euo pipefail
 AUTHORIZED_SUDO_USERS=(
     "root"
     "GREYTEAM"
-    "scp343"
+    "SQL_APACHE_GREYTEAM"
+    "SCORER_GREYTEAM"
+    "SCP343"
+    "ntf"
 )
 
 # =============================================================================
