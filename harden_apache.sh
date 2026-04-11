@@ -173,12 +173,22 @@ success "  Document root: ${APACHE_DOCROOT}"
 if [[ -z "$APACHE_USER" ]]; then
     APACHE_USER=$(grep -rh "^\s*User\b" "${APACHE_PREFIX}/" 2>/dev/null \
         | awk '{print $2}' | head -1)
+    # Debian/Ubuntu uses ${APACHE_RUN_USER} env var - resolve it from envvars
+    if [[ "$APACHE_USER" == *'${'* ]] || [[ -z "$APACHE_USER" ]]; then
+        APACHE_USER=$(grep -E '^export APACHE_RUN_USER=' "${APACHE_PREFIX}/envvars" 2>/dev/null \
+            | cut -d= -f2 | tr -d "'" | head -1)
+    fi
     APACHE_USER="${APACHE_USER:-www-data}"
 fi
 
 if [[ -z "$APACHE_GROUP" ]]; then
     APACHE_GROUP=$(grep -rh "^\s*Group\b" "${APACHE_PREFIX}/" 2>/dev/null \
         | awk '{print $2}' | head -1)
+    # Debian/Ubuntu uses ${APACHE_RUN_GROUP} env var - resolve it from envvars
+    if [[ "$APACHE_GROUP" == *'${'* ]] || [[ -z "$APACHE_GROUP" ]]; then
+        APACHE_GROUP=$(grep -E '^export APACHE_RUN_GROUP=' "${APACHE_PREFIX}/envvars" 2>/dev/null \
+            | cut -d= -f2 | tr -d "'" | head -1)
+    fi
     APACHE_GROUP="${APACHE_GROUP:-www-data}"
 fi
 
