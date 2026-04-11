@@ -273,6 +273,8 @@ echo ""
 # =============================================================================
 info "Step 8: Configuring outbound rules..."
 
+ufw_cmd allow out proto tcp to 10.10.10.102 port 3306
+
 for port_proto in "${OUTBOUND_RULES[@]}"; do
     port="${port_proto%%/*}"
     proto="${port_proto##*/}"
@@ -285,7 +287,6 @@ for port_proto in "${OUTBOUND_RULES[@]}"; do
         *)    label="custom" ;;
     esac
 
-    ufw_cmd allow out proto tcp to 10.10.10.102 port 3306
     ufw_cmd allow out proto "$proto" to any port "$port"
     info "  Allowed outbound: ${port}/${proto} (${label})"
 done
