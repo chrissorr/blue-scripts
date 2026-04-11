@@ -289,8 +289,8 @@ echo ""
 info "Step 3: Auditing dangerous modules..."
 echo ""
 
-declare -a MODULES_TO_DISABLE
-declare -a MODULES_ENABLED_PATHS  # for source installs
+declare -a MODULES_TO_DISABLE=()
+declare -a MODULES_ENABLED_PATHS=()  # for source installs
 
 if [[ "$INSTALL_TYPE" == "package" ]]; then
     MODS_ENABLED_DIR="${APACHE_PREFIX}/mods-enabled"
