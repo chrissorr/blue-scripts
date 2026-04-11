@@ -35,10 +35,11 @@ set -euo pipefail
 #
 # =============================================================================
 ALLOWED_USERS=(
-    "cyberrange"
     "GREYTEAM"
-    "scp073"
-    "scp343"
+    "SQL_APACHE_GREYTEAM"
+    "SCORER_GREYTEAM"
+    "SCP073"
+    "SCP343"
     "ntf"
 )
 
