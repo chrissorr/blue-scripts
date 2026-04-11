@@ -55,9 +55,9 @@ EXTRA_INBOUND_PORTS=(
 #
 # All traffic from this subnet is explicitly allowed inbound and outbound.
 # This must never be blocked regardless of any other rule.
-# From the blue team packet topology: grey team is at 10.10.10.200/24
+# From the blue team packet topology: grey team is at 10.10.10.200/27
 # =============================================================================
-GREYTEAM_SUBNET="10.10.10.200/28"
+GREYTEAM_SUBNET="10.10.10.200/27"
 
 # =============================================================================
 # Configuration
