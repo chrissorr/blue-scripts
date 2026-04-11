@@ -244,15 +244,12 @@ patch_security_conf() {
     local directive="$1"
     local value="$2"
 
-    if grep -qE "^\s*#?\s*${directive}\s" "$SECURITY_CONF" 2>/dev/null; then
-        # Directive exists (commented or not) - replace the whole line
-        sed -i "s|^\s*#\?\s*${directive}\s.*|${directive} ${value}|" "$SECURITY_CONF"
-        success "  ${directive} set to ${value} in ${SECURITY_CONF}"
-    else
-        # Not present at all - append it
-        echo "${directive} ${value}" >> "$SECURITY_CONF"
-        success "  ${directive} appended to ${SECURITY_CONF}"
-    fi
+    # First, comment out ALL existing lines for this directive (active or not)
+    sed -i "s|^\(\s*\)\(${directive}\s\)|\1#\2|g" "$SECURITY_CONF"
+
+    # Then append a single clean active line at the end
+    echo "${directive} ${value}" >> "$SECURITY_CONF"
+    success "  ${directive} set to ${value} in ${SECURITY_CONF}"
 }
 
 if [[ -f "$SECURITY_CONF" ]]; then
