@@ -225,7 +225,60 @@ fi
 echo ""
 
 # =============================================================================
-# Step 3 - Audit and disable dangerous modules
+# Step 3 - Patch security.conf for ServerTokens and ServerSignature
+#
+# ServerTokens and ServerSignature are global directives that must be set
+# in the main server config context to take effect. On Debian/Ubuntu package
+# installs, /etc/apache2/conf-available/security.conf is the canonical place
+# for these. Our drop-in in conf-available/ does not override them reliably.
+#
+# We sed the existing values in security.conf rather than appending, so we
+# don't end up with duplicate directives. If the file doesn't exist we fall
+# back to appending to apache2.conf directly.
+# =============================================================================
+info "Step 3: Patching security.conf for ServerTokens/ServerSignature..."
+
+SECURITY_CONF="${APACHE_PREFIX}/conf-available/security.conf"
+
+patch_security_conf() {
+    local directive="$1"
+    local value="$2"
+
+    if grep -qE "^\s*#?\s*${directive}\s" "$SECURITY_CONF" 2>/dev/null; then
+        # Directive exists (commented or not) - replace the whole line
+        sed -i "s|^\s*#\?\s*${directive}\s.*|${directive} ${value}|" "$SECURITY_CONF"
+        success "  ${directive} set to ${value} in ${SECURITY_CONF}"
+    else
+        # Not present at all - append it
+        echo "${directive} ${value}" >> "$SECURITY_CONF"
+        success "  ${directive} appended to ${SECURITY_CONF}"
+    fi
+}
+
+if [[ -f "$SECURITY_CONF" ]]; then
+    if $DRY_RUN; then
+        dryrun "Would set ServerTokens Prod in ${SECURITY_CONF}"
+        dryrun "Would set ServerSignature Off in ${SECURITY_CONF}"
+    else
+        patch_security_conf "ServerTokens" "Prod"
+        patch_security_conf "ServerSignature" "Off"
+    fi
+else
+    warn "  ${SECURITY_CONF} not found - appending directives to apache2.conf"
+    if ! $DRY_RUN; then
+        MAIN_CONF="${APACHE_PREFIX}/apache2.conf"
+        grep -qE "^\s*ServerTokens\s" "$MAIN_CONF" \
+            || echo "ServerTokens Prod" >> "$MAIN_CONF"
+        grep -qE "^\s*ServerSignature\s" "$MAIN_CONF" \
+            || echo "ServerSignature Off" >> "$MAIN_CONF"
+        success "  ServerTokens and ServerSignature added to ${MAIN_CONF}"
+    fi
+fi
+
+echo ""
+
+# =============================================================================
+# Step 4 - Audit and disable dangerous modules
 #
 # For package installs we use a2dismod which removes the symlink from
 # mods-enabled/ and is the clean Debian way to disable modules.
@@ -308,7 +361,7 @@ fi
 echo ""
 
 # =============================================================================
-# Step 4 - Enforce Apache file and directory ownership/permissions
+# Step 5 - Enforce Apache file and directory ownership/permissions
 #
 # CIS recommends:
 #   - Apache config dirs/files owned by root (not the Apache user)
@@ -355,7 +408,7 @@ fi
 echo ""
 
 # =============================================================================
-# Step 5 - Write security hardening config drop-in
+# Step 6 - Write security hardening config drop-in
 #
 # We write a single hardened config file covering:
 #
@@ -398,13 +451,6 @@ HARDENING_CONF_CONTENT="# ======================================================
 # =============================================================================
 
 # -- Information Disclosure --
-
-# Hide Apache version and OS from Server header
-# 'Prod' shows only 'Apache', nothing more
-ServerTokens Prod
-
-# Remove version info from error pages and directory listings
-ServerSignature Off
 
 # Prevent inode numbers from appearing in ETag response headers
 # Inodes can leak filesystem information useful for fingerprinting
@@ -557,7 +603,7 @@ fi
 echo ""
 
 # =============================================================================
-# Step 6 - Validate Apache config before reloading
+# Step 7 - Validate Apache config before reloading
 #
 # This is the equivalent of sshd -t for Apache. If our hardening config
 # has any syntax errors, Apache will refuse to reload and the current
@@ -589,7 +635,7 @@ fi
 echo ""
 
 # =============================================================================
-# Step 7 - Reload Apache
+# Step 8 - Reload Apache
 #
 # We use graceful reload (graceful) rather than restart - it lets existing
 # connections finish before workers restart, so in-progress scoring checks
