@@ -26,6 +26,7 @@ set -euo pipefail
 # =============================================================================
 PROTECTED_USERS=(
     "GREYTEAM"
+    "greyteam"
     "SQL_APACHE_GREYTEAM"
     "SCORER_GREYTEAM"
     "SCP073"
